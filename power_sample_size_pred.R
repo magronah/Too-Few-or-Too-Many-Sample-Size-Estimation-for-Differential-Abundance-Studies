@@ -7,22 +7,23 @@ library(rlist)
 library(latex2exp)
 library(scam)
 library(purrr)
-library(ggnewscale)
-source("functions.R")
-source("param_vals.R")
 library(scales)
 library(grid)
+library(ggnewscale)
+#############################################################################
+source("functions.R")
+source("param_vals.R")
 #############################################################################
 gam_fit_list           =   readRDS("results/gam_fit_list.rds")
 logmeanFit_list        =   readRDS("results/logmeanFit_list.rds")
 dispersionFit_list     =   readRDS("results/dispersionFit_list.rds")
 logfoldchangeFit_list  =   readRDS("results/logfoldchangeFit_list.rds")
 ##############################################################################
-data_names       =   c("Obesity","Blueberry Soil","Glass-Plastic")
+data_names       =   c("obesity","blueberry soil","glass-plastic")
 nsim = 5; notu = 1000
 nsample_vec =  seq(10,150,20)
 grid_len =  20  
-
+#############################################################################
 power_dd_list  =  pred_dd_list = list()
 logfoldchange_sim_list  =  logmean_sim_list  = list()
  
@@ -107,6 +108,9 @@ names(pred_dd_list)     =   data_names
 names(logfoldchange_sim_list)  =  data_names
 names(logmean_sim_list)  =  data_names
 ################################################################
+if (!dir.exists("results")) {
+  dir.create("results", recursive = TRUE)
+}
 saveRDS(power_dd_list, file = "results/power_dd_list.rds")
 saveRDS(pred_dd_list, file = "results/pred_dd_list.rds")
 saveRDS(logfoldchange_sim_list, file = "results/logfoldchange_sim_list.rds")
@@ -122,12 +126,13 @@ power_df <- do.call(rbind, lapply(power_dd_list, function(df) {
   df[df$sample_size %in% sub_samples, ]
 }))
 #############################################################################
-cont_breaks <- seq(0.2, 0.8, 0.2)
-cont_breaks <- seq(0.2, 0.8, 0.5)
+cont_breaks <- c(0.2, 0.6,0.8) #seq(0.2, 0.8, 0.2)
 ddplt  = plot_fun2(pred_df,
                    power_df,
                    cont_breaks, facet_labs)
+
 ddplt
+
 #############################################################################
 target_powers <- seq(0.1, 0.99, 0.05)
 lfc_vals <- c(1.3, 1.5, 2)
@@ -141,12 +146,11 @@ ss_vary_lfc <- do.call(
       vary_vals = lfc_vals,
       mod = gam_fit_list[[i]]$gam_mod,
       vary = "abs_lfc",
-      fixed_logmean = 0
+      fixed_logmean = 5
     ) |>
       transform(dataset = data_names[[i]])
   })
 )
-
 
 ss_vary_lmc <- do.call(
   rbind,
@@ -163,194 +167,63 @@ ss_vary_lmc <- do.call(
 )
 
 #############################################################################
-actual_n <- data.frame(
-  dataset  =  data_names,
-  n_actual =  c(25, 40, 18)
-)
+file_names       =   c("ob_ross","Blueberry",
+                       "glass_plastic_oberbeckmann")
+
+ref_name_vec     =   c("H","Soil","plastic")
+#############################################################################
+actual_n <- map_dfr(file_names, function(data_path) {
+  
+  metadata <- read.table(
+    file.path(data_path, paste0(data_path, "_metadata.tsv")),
+    header = TRUE, sep = "\t",
+    check.names = FALSE, comment.char = ""
+  )
+  
+  counts <- table(metadata$comparison)
+  
+   data.frame(file_name = data_path, min_n = min(counts),
+                  max_n = max(counts))
+})
+
+actual_n$dataset = data_names
 #############################################################################
 p1 <- plot_power_curve(
   data = ss_vary_lfc,
   group_var = abs_lfc,
+  nn = 14,
   actual_n  =  actual_n,
-  legend_label = TeX("$|\\log_2(fold \\ change)$|")
-)
+  legend_label = TeX("$|\\log_2(fold \\ change)$|"))
 
 p2 <- plot_power_curve(
   data = ss_vary_lmc,
   actual_n  =  actual_n,
+  nn = 14,
   group_var = logmean,
   legend_label = TeX("$\\log_2(mean \\ count)$")
 )
 
-p1/p2
-
-#####################################################################
-
-
-
-ss_all <- do.call(
-  rbind,
-  lapply(seq_along(gam_fit_list), function(i) {
-    sample_size_est(target_powers, lfc_vals, gam_fit_list[[i]]$gam_mod) |>
-      transform(dataset = data_names[[i]])
-  })
+ggsave(
+  filename = "figures/ss1.pdf",
+  plot = p1,
+  width = 17,
+  height = 5,
+  units = "in",
+  device = cairo_pdf
 )
 
-ss_var_lmc <- function(target_powers,lmc_vals, mod){
-  dd_pow <- do.call(rbind, lapply(lmc_vals, function(lmc) {
-    
-    ss_vals <- sapply(target_powers, function(tp) {
-      ss_solver(
-        target_power = tp,
-        logmean = lmc,
-        abs_lfc = 1.5,
-        model = mod,
-        xmin = log2(5),
-        xmax = log2(500)
-      )
-    })
-    
-    data.frame(
-      sample_size = ss_vals,
-      power = target_powers,
-      logmean = lmc
-    )
-  }))
-  
-}
-lmc_vals <- c(-1, 0, 5)
 
-ss_lmc <- map2_dfr(gam_fit_list, data_names, ~ {
-  ss_var_lmc(target_powers, lmc_vals, .x$gam_mod) %>%
-    mutate(dataset = .y)
-})
-
-nn= 15
+ggsave(
+  filename = "figures/ss2.pdf",
+  plot = p2,
+  width = 17,
+  height = 5,
+  units = "in",
+  device = cairo_pdf
+)
+p1/p2
 #####################################################################
 
-
-p1 + scale_y_continuous(trans = "logit")
-
-p2 = ggplot(dd_pow, aes((sample_size), power, color = factor(abs_lfc))) +
-  geom_point(size=2) +
-  geom_line(lwd =1) +
-  theme_bw() +
-  labs(
-    x = "Sample size per group",
-    y = "Target power",
-    color = "log2(mean count)"
-  )+
-  theme(
-    #strip.text = element_text(size = nn, color = "black"),
-    legend.title = element_text(size = nn, color = "black"),
-    legend.text = element_text(size = nn, color = "black"),
-    axis.text.x = element_text(size = nn, color = "black"),
-    axis.text.y = element_text(size = nn, color = "black"),
-    axis.title.x = element_text(size = nn, color = "black"),
-    axis.title.y = element_text(size = nn, color = "black")
-  )
-
-p2
-p1|p2
-target_powers <- seq(0.1,0.99,0.05)
-
-ss_vals <- sapply(target_powers, function(tp) {
-  ss_solver(
-    target_power = tp,
-    logmean = log2(7),
-    abs_lfc = log2(2.5),
-    model = mod,
-    xmin = log2(5),
-    xmax = log2(500)
-  )
-})
-
-dd_pow = data.frame(sample_size = ss_vals, 
-                    power = target_powers)
-
-ggplot(dd_pow, aes(sample_size, power)) +
-  geom_point() +
-  geom_line() +
-  theme_bw() +
-  labs(x = "Sample size per group",
-       y = "Target power") 
-
-
-
-#################################################################
-ggplot(dd_pow, aes(sample_size, power)) +
-  geom_point() +
-  geom_line() +
-  scale_x_log10() +
-  theme_bw()
-
-
-cont_breaks2 = 0.6
-
-power_estimate$sample_size <- factor(power_estimate$sample_size,
-                                     levels = c(25, 75, 125, 150))
-
-dd$pvalue_reject <- factor(dd$pvalue_reject,
-                           levels = c(0, 1),
-                           labels = c("No", "Yes"))
-
-#ggrastr::rasterise(
-#  geom_point(aes(colour = pvalue_reject), alpha = 0.35),
-#  dpi = 300
-#) +
-# scale_colour_manual(
-#  values = c("No" = "black", "Yes" = "red"),
-#  name = "Significant Taxa"
-#) +
-
-
-one_break <- 0.2
-gg_2dimc_one <- ggplot(dd, aes(logmean, abs_lfc)) +
-  ggnewscale::new_scale_colour() +
-  geom_contour(
-    data = power_estimate,
-    aes(
-      x = logmean,
-      y = abs_lfc,
-      z = power,
-      colour = factor(sample_size)
-    ),
-    breaks = one_break,
-    linewidth = 1
-  ) +
-  metR::geom_text_contour(
-    data = power_estimate,
-    aes(
-      x = logmean,
-      y = abs_lfc,
-      z = power,
-      label = after_stat(level),
-      colour = factor(sample_size)),
-    breaks = one_break,
-    stroke = 0.15,
-    check_overlap = FALSE,
-    show.legend = FALSE
-  ) +
-  scale_colour_manual(
-    values = c(
-      "25"  = "#F8766D",
-      "75"  = "#7CAE00",
-      "125" = "#00BFC4",
-      "150" = "#C77CFF"
-    ),
-    name = "Sample size",
-    labels = c(
-      "25"  = "25 samples per group",
-      "75"  = "75 samples per group",
-      "125" = "125 samples per group",
-      "150" = "150 samples per group"
-    )
-  ) +
-  xlab(TeX("$\\log_2$(mean counts)")) +
-  ylab(TeX("|$\\log_2$(fold change)|")) + 
-  theme_bw(base_size = 16)
-
-gg_2dimc_one
 
 
 
