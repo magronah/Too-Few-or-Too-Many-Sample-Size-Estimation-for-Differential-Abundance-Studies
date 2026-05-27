@@ -12,15 +12,13 @@ library(latex2exp)
 library(scales)
 library(grid)
 library(ggnewscale)
+library(ggbeeswarm)
 
 source("functions.R")
 path <- file.path(getwd(), "results_other_data")
 ####################################################################
 logmean_df  <-  read_to_df("^logmeanEst_", "logmeanEst_")
-logmean_df  <-  reorder_by_median(logmean_df)
-
 logfc_df    <-  read_to_df("^logfoldchangeEst_", "logfoldchangeEst_")
-logfc_df    <-  reorder_by_median(logfc_df)
 
 logmeanFit_list       <- read_to_list("^logmeanFit_", "logmeanFit_")
 logfoldchangeFit_list <- read_to_list("^logfoldchangeFit_", "logfoldchangeFit_")
@@ -37,16 +35,43 @@ data_names    =    names(dispersionFit_list)
 ##' 
 
 lmc_dist <- ggplot(logmean_df, aes(Dataset, value)) +
-  geom_boxplot(fill = "grey85", colour = "black", alpha = 0.1,outlier.size = 1.5) +
-  labs(x = "Dataset", y = expression(log[2]("mean abundance"))) +
+  geom_violin(fill = "grey85",
+              colour = "black",
+              alpha = 0.5,
+              trim = FALSE) +
+  geom_boxplot(width = 0.1,
+               fill = "white",
+               outlier.size = 0.8) +
+  labs(x = "Dataset",
+       y = expression(log[2]("mean abundance"))) +
   my_theme
+
+
+# lmc_dist <- ggplot(logmean_df, aes(Dataset, value)) +
+#   geom_boxplot(fill = "grey85", colour = "black", alpha = 0.1,outlier.size = 1.5) +
+#   labs(x = "Dataset", y = expression(log[2]("mean abundance"))) +
+#   my_theme
 
 
 abslfc_dist <- ggplot(logfc_df, aes(Dataset, abs(value))) +
-  geom_boxplot(fill = "grey85", colour = "black", alpha = 0.1, outlier.size = 1.5) +
-  labs(x = "Dataset", y = expression("|" * log[2]("fold change") * "|")) +
+  geom_violin(fill = "grey85",
+              colour = "black",
+              alpha = 0.5,
+              trim = FALSE) +
+  geom_boxplot(width = 0.1,
+               fill = "white",
+               outlier.size = 0.8) +
+  labs(x = "Dataset",
+       y = expression("|" * log[2]("fold change") * "|")) +
   scale_y_continuous() +
   my_theme
+
+
+# abslfc_dist <- ggplot(logfc_df, aes(Dataset, abs(value))) +
+#   geom_boxplot(fill = "grey85", colour = "black", alpha = 0.1, outlier.size = 1.5) +
+#   labs(x = "Dataset", y = expression("|" * log[2]("fold change") * "|")) +
+#   scale_y_continuous() +
+#   my_theme
 
 
 ggsave(
@@ -76,7 +101,7 @@ logmean_med <- logmean_df %>%
 
 logfc_med <- logfc_df %>%
   group_by(Dataset) %>%
-  summarise(median = median(value, na.rm = TRUE)) %>%
+  summarise(median = median(abs(value), na.rm = TRUE)) %>%
   mutate(type = "logfoldchange")
 ##########################################################################
 med_df <- bind_rows(logmean_med, logfc_med)
@@ -89,12 +114,19 @@ pp_med <- ggplot(med_df, aes(x = type, y = median)) +
     linewidth = 0.8,
     outlier.shape = NA
   ) +
-  geom_jitter(
-    width = 0.08,
-    size = 2,
+  geom_beeswarm(
+    size = 1.7,
     alpha = 0.7,
-    colour = "black"
+    colour = "black",
+    cex = 1.2, 
+    fill = "white"
   ) +
+  # geom_jitter(
+  #   width = 0.08,
+  #   size = 2,
+  #   alpha = 0.7,
+  #   colour = "black"
+  # ) +
   scale_x_discrete(
     labels = c(
       logmean = expression(log[2]("mean abundance")),
@@ -121,11 +153,8 @@ pp_med <- ggplot(med_df, aes(x = type, y = median)) +
     axis.ticks.length = unit(0.2, "cm"),
     
     plot.margin = margin(10, 10, 10, 10)
-  ) + scale_y_log10(
-    breaks = c(0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2),
-    labels = scales::label_number(accuracy = 0.01)
-  )
-
+  ) 
+  #+ scale_y_continuous()
 
 ggsave(
   filename = "figures/med_both.eps",
@@ -136,7 +165,7 @@ ggsave(
   units = "in"
 )
 ###########################################################################
-abslfc <- summary(abs(logfc_med$median))
+abslfc <- summary((logfc_med$median))
 lmc    <- summary(logmean_med$median)
 
 summary_abslfc_med <- data.frame(
@@ -635,6 +664,7 @@ power_dd_list = readRDS("results_other_data/power_sim/power_dd_list.rds")
 pred_dd_list = readRDS("results_other_data/power_sim/pred_dd_list.rds")
 logfoldchange_sim_list = readRDS("results_other_data/power_sim/logfoldchange_sim_list.rds")
 logmean_sim_list = readRDS("results_other_data/power_sim/logmean_sim_list.rds")
+
 ################################################################
 subb = c("Blueberry", "glass_plastic_oberbeckmann", 
          "ob_ross",  "MALL", "Exercise")
@@ -691,9 +721,46 @@ ggsave(
   height = 8,
   units = "in"
 )
+#############################################################################
+##Contour plots for other datasets
+## in sets of 5 and then 5 set
 
+remaining_list  =  list()
+dataset_names <- setdiff(names(sample_size_list), subb)
+splits  <- split(dataset_names, ceiling(seq_along(dataset_names) / 5))
+cont_breaks <- c(0.1,0.2, 0.6,0.8) 
+plot_names  = paste0("cont_plot",1:length(splits),".eps")
 
+for(i in 1:length(splits)){
+  pred_df <- do.call(rbind, lapply(pred_dd_list[splits[[i]]], function(df) {
+    df[df$sample_size %in% sub_samples, ]
+  }))
+  
+  power_df <- do.call(rbind, lapply(power_dd_list[splits[[i]]], function(df) {
+    df[df$sample_size %in% sub_samples, ]
+  }))
+  
+  ddplt  = plot_fun2(pred_df,
+                     power_df,
+                     cont_breaks, 
+                     facet_labs)
 
+  print(i)
+  ggsave(
+    filename = paste0("figures/",plot_names[i]),
+    plot = ddplt,
+    device = cairo_ps,   
+    width = 12,
+    height = 10,
+    units = "in"
+  )
+  
+  remaining_list[[i]] = ddplt
+}
+
+names(remaining_list) = plot_names
+
+remaining_list[[4]] 
 #############################################################################
 target_powers <- seq(0.1, 0.99, 0.05)
 lfc_vals <- c(1.3, 1.5, 2)
